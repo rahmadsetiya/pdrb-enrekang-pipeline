@@ -10,6 +10,7 @@ from .extract import (
     write_observations,
 )
 from .provenance import load_and_verify
+from .quality import check_processed_file
 
 
 PROJECT_ROOT = Path(os.environ.get("PDRB_PROJECT_ROOT", Path.cwd())).resolve()
@@ -24,7 +25,9 @@ def transform(executable: str = "pdftotext") -> int:
     load_and_verify(RAW_PDF, PROVENANCE)
     page_text = extract_page_text(RAW_PDF, executable=executable)
     table = parse_table(page_text)
-    return materialize(table)
+    count = materialize(table)
+    check_processed_file(PROCESSED)
+    return count
 
 
 def materialize(table: ExtractedTable) -> int:
