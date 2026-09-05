@@ -47,6 +47,14 @@ class ExtractedTable:
     published_totals: tuple[Decimal, ...]
 
 
+@dataclass(frozen=True)
+class TableCandidate:
+    rows: tuple[tuple[str, tuple[Decimal, ...]], ...]
+    total_candidates: tuple[tuple[Decimal, ...], ...]
+    title_found: bool
+    header_found: bool
+
+
 def extract_page_text(pdf_path: Path, executable: str = "pdftotext") -> str:
     result = subprocess.run(
         [
@@ -72,13 +80,8 @@ def parse_decimal(value: str) -> Decimal:
     return Decimal(value.replace(",", ""))
 
 
-def parse_table(page_text: str) -> ExtractedTable:
-    if "Lampiran" not in page_text or "Harga Berlaku" not in page_text:
-        raise ValueError("Appendix 1 ADHB title was not found on the extracted page.")
-    if not HEADER_PATTERN.search(page_text):
-        raise ValueError("Expected 2021-2025 columns and status markers were not found.")
-
-    rows: dict[str, tuple[Decimal, ...]] = {}
+def parse_table_candidate(page_text: str) -> TableCandidate:
+    rows: list[tuple[str, tuple[Decimal, ...]]] = []
     total_candidates: list[tuple[Decimal, ...]] = []
     for line in page_text.splitlines():
         values = VALUE_PATTERN.findall(line)
@@ -88,12 +91,29 @@ def parse_table(page_text: str) -> ExtractedTable:
         parsed_values = tuple(parse_decimal(value) for value in values)
         code_match = CODE_PATTERN.match(line)
         if code_match:
-            code = code_match.group(1)
-            if code in rows:
-                raise ValueError(f"Duplicate industry code in extraction: {code}")
-            rows[code] = parsed_values
+            rows.append((code_match.group(1), parsed_values))
         else:
             total_candidates.append(parsed_values)
+
+    return TableCandidate(
+        rows=tuple(rows),
+        total_candidates=tuple(total_candidates),
+        title_found="Lampiran" in page_text and "Harga Berlaku" in page_text,
+        header_found=bool(HEADER_PATTERN.search(page_text)),
+    )
+
+
+def validate_table(candidate: TableCandidate) -> ExtractedTable:
+    if not candidate.title_found:
+        raise ValueError("Appendix 1 ADHB title was not found on the extracted page.")
+    if not candidate.header_found:
+        raise ValueError("Expected 2021-2025 columns and status markers were not found.")
+
+    rows: dict[str, tuple[Decimal, ...]] = {}
+    for code, values in candidate.rows:
+        if code in rows:
+            raise ValueError(f"Duplicate industry code in extraction: {code}")
+        rows[code] = values
 
     expected_codes = set(INDUSTRIES)
     if set(rows) != expected_codes:
@@ -102,14 +122,19 @@ def parse_table(page_text: str) -> ExtractedTable:
         raise ValueError(
             f"Unexpected industry codes; missing={missing}, unexpected={unexpected}"
         )
-    if len(total_candidates) != 1:
+    if len(candidate.total_candidates) != 1:
         raise ValueError(
-            f"Expected one published total row, found {len(total_candidates)}."
+            "Expected one published total row, found "
+            f"{len(candidate.total_candidates)}."
         )
 
-    table = ExtractedTable(rows=rows, published_totals=total_candidates[0])
+    table = ExtractedTable(rows=rows, published_totals=candidate.total_candidates[0])
     validate_totals(table)
     return table
+
+
+def parse_table(page_text: str) -> ExtractedTable:
+    return validate_table(parse_table_candidate(page_text))
 
 
 def validate_totals(table: ExtractedTable) -> None:

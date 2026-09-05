@@ -84,6 +84,44 @@ docker compose run --rm pipeline python -m pdrb_pipeline transform
 docker compose run --rm pipeline python -m pdrb_pipeline load
 ```
 
+## Orchestrated flow
+
+Run the same pipeline as a local Prefect flow:
+
+```bash
+docker compose run --rm pipeline python -m pdrb_pipeline orchestrate
+```
+
+The flow runs synchronously with six explicit stages:
+
+```text
+verify-source
+  -> extract-table
+  -> validate-table
+  -> normalize-observations
+  -> load-postgres
+  -> verify-loaded-data
+```
+
+Each stage has its own Prefect task state and safe operational logs. The logs
+include stage names, source identity, row counts, and output paths, but never
+the database URL or credentials. The flow runs locally and does not require a
+Prefect server, worker, hosted account, or scheduler.
+
+The Compose environment explicitly selects ephemeral mode and disables Prefect
+analytics and resource telemetry for this local-only flow. Prefect still
+records task states and logs in the temporary local backend used for each
+invocation.
+
+Only the two PostgreSQL tasks retry: they make at most two additional attempts
+after transient `psycopg.OperationalError` failures, waiting 2 then 5 seconds.
+Source, extraction, validation, normalization, and non-operational database
+errors fail immediately because retrying deterministic work would hide the
+actual fault.
+
+The original `transform`, `load`, and `run` commands remain available for
+direct execution and produce the same intermediate and processed files.
+
 ## Query the result
 
 ```bash
