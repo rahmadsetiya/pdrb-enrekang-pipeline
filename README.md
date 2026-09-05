@@ -92,15 +92,16 @@ Run the same pipeline as a local Prefect flow:
 docker compose run --rm pipeline python -m pdrb_pipeline orchestrate
 ```
 
-The flow runs synchronously with six explicit stages:
+The flow runs synchronously with seven explicit stages:
 
 ```text
 verify-source
   -> extract-table
   -> validate-table
   -> normalize-observations
+  -> check-processed-quality
   -> load-postgres
-  -> verify-loaded-data
+  -> check-loaded-quality
 ```
 
 Each stage has its own Prefect task state and safe operational logs. The logs
@@ -115,12 +116,41 @@ invocation.
 
 Only the two PostgreSQL tasks retry: they make at most two additional attempts
 after transient `psycopg.OperationalError` failures, waiting 2 then 5 seconds.
-Source, extraction, validation, normalization, and non-operational database
+Source, extraction, validation, processed quality, and non-operational database
 errors fail immediately because retrying deterministic work would hide the
 actual fault.
 
 The original `transform`, `load`, and `run` commands remain available for
 direct execution and produce the same intermediate and processed files.
+
+## Data quality
+
+The quality contract is implemented once in the framework-independent domain
+layer. It checks the generated processed CSV and the loaded Enrekang slice for:
+
+- `row_count`: exactly 85 observations
+- `industry_count`: exactly 17 industries
+- `year_range`: all five years from 2021 through 2025
+- `duplicate_keys`: no duplicate region/industry/year/series keys
+- `required_not_null`: no missing required values
+- `series_code`: only `adhb`
+- `unit`: only `billion_idr`
+- `publication_status`: the expected status for each year
+- `positive_values`: finite values strictly greater than zero
+
+The earlier `published_total_reconciliation` rule remains part of table
+validation before normalization. It compares each year's 17-industry sum with
+the publication total using the existing `0.05` billion rupiah tolerance.
+
+The orchestrated command emits one deterministic line per check, for example:
+
+```text
+quality scope=processed rule=row_count status=PASS observed=85 expected=85
+```
+
+A critical failure raises `DataQualityError`; the message includes the scope,
+stable rule ID, observed result, and expectation. Quality failures are not
+retried. Logs do not include database credentials, URLs, or row payloads.
 
 ## Query the result
 

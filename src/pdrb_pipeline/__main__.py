@@ -3,6 +3,7 @@ import os
 
 from .load import load_postgres
 from .pipeline import INTERMEDIATE, PROCESSED, PROVENANCE, SCHEMA, transform
+from .quality import check_loaded_data, check_processed_file
 
 
 def parse_args():
@@ -36,7 +37,10 @@ def main():
         database_url = os.environ.get("DATABASE_URL")
         if not database_url:
             raise SystemExit("DATABASE_URL is required for PostgreSQL loading.")
+        if args.command == "load":
+            check_processed_file(PROCESSED)
         count = load_postgres(database_url, PROCESSED, PROVENANCE, SCHEMA)
+        check_loaded_data(database_url)
         print(f"PostgreSQL contains {count} observations.")
 
 

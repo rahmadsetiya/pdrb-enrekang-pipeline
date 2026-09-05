@@ -2,6 +2,12 @@ import psycopg
 from prefect import flow, get_run_logger, task
 
 from . import extract, load, pipeline, provenance
+from .quality import (
+    DataQualityError,
+    QualityReport,
+    check_loaded_data,
+    check_processed_file,
+)
 
 
 def retry_transient_database_failure(task, task_run, state) -> bool:
@@ -12,6 +18,22 @@ def retry_transient_database_failure(task, task_run, state) -> bool:
     except Exception:
         return False
     return False
+
+
+def log_quality_report(report: QualityReport) -> None:
+    logger = get_run_logger()
+    for line in report.lines():
+        logger.info(line)
+
+
+def run_quality_check(check, *args) -> QualityReport:
+    try:
+        report = check(*args)
+    except DataQualityError as error:
+        log_quality_report(error.report)
+        raise
+    log_quality_report(report)
+    return report
 
 
 @task(name="verify-source")
@@ -40,7 +62,8 @@ def extract_table_task(metadata: dict) -> extract.TableCandidate:
 
 @task(name="validate-table")
 def validate_table_task(candidate: extract.TableCandidate) -> extract.ExtractedTable:
-    table = extract.validate_table(candidate)
+    table, report = extract.validate_table_with_report(candidate)
+    log_quality_report(report)
     get_run_logger().info(
         "Validated industries=%s years=%s", len(table.rows), len(extract.YEARS)
     )
@@ -59,13 +82,22 @@ def normalize_observations_task(table: extract.ExtractedTable) -> int:
     return count
 
 
+@task(name="check-processed-quality")
+def check_processed_quality_task(normalized_count: int) -> QualityReport:
+    report = run_quality_check(check_processed_file, pipeline.PROCESSED)
+    get_run_logger().info(
+        "Verified processed quality normalized_observations=%s", normalized_count
+    )
+    return report
+
+
 @task(
     name="load-postgres",
     retries=2,
     retry_delay_seconds=[2, 5],
     retry_condition_fn=retry_transient_database_failure,
 )
-def load_postgres_task(database_url: str, normalized_count: int) -> int:
+def load_postgres_task(database_url: str, processed_report: QualityReport) -> int:
     count = load.load_postgres(
         database_url,
         pipeline.PROCESSED,
@@ -73,25 +105,26 @@ def load_postgres_task(database_url: str, normalized_count: int) -> int:
         pipeline.SCHEMA,
     )
     get_run_logger().info(
-        "Loaded normalized=%s database_observations=%s", normalized_count, count
+        "Loaded processed_quality=%s database_observations=%s",
+        "PASS" if processed_report.passed else "FAIL",
+        count,
     )
     return count
 
 
 @task(
-    name="verify-loaded-data",
+    name="check-loaded-quality",
     retries=2,
     retry_delay_seconds=[2, 5],
     retry_condition_fn=retry_transient_database_failure,
 )
-def verify_loaded_data_task(database_url: str, loaded_count: int) -> int:
-    count = load.verify_observation_count(database_url)
+def check_loaded_quality_task(database_url: str, loaded_count: int) -> QualityReport:
+    report = run_quality_check(check_loaded_data, database_url)
     get_run_logger().info(
-        "Verified loaded_count=%s final_database_observations=%s",
+        "Verified loaded quality loader_observations=%s",
         loaded_count,
-        count,
     )
-    return count
+    return report
 
 
 @flow(name="pdrb-enrekang-ingestion")
@@ -102,7 +135,15 @@ def pdrb_ingestion_flow(database_url: str) -> int:
     candidate = extract_table_task(metadata)
     table = validate_table_task(candidate)
     normalized_count = normalize_observations_task(table)
-    loaded_count = load_postgres_task(database_url, normalized_count)
-    verified_count = verify_loaded_data_task(database_url, loaded_count)
+    processed_report = check_processed_quality_task(normalized_count)
+    loaded_count = load_postgres_task(database_url, processed_report)
+    loaded_report = check_loaded_quality_task(database_url, loaded_count)
+    verified_count = int(
+        next(
+            result.observed
+            for result in loaded_report.results
+            if result.rule_id == "row_count"
+        )
+    )
     logger.info("Completed local PDRB ingestion flow observations=%s", verified_count)
     return verified_count

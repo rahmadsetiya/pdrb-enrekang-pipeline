@@ -5,17 +5,20 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
+from .quality import (
+    EXPECTED_SERIES_CODE,
+    EXPECTED_STATUSES,
+    EXPECTED_UNIT,
+    EXPECTED_YEARS,
+    QualityReport,
+    check_published_totals,
+)
+
 
 PDF_PAGE = 127
-YEARS = (2021, 2022, 2023, 2024, 2025)
+YEARS = EXPECTED_YEARS
 YEAR_HEADERS = ("2021", "2022", "2023", "2024*", "2025**")
-YEAR_STATUSES = {
-    2021: "final",
-    2022: "final",
-    2023: "final",
-    2024: "preliminary",
-    2025: "very_preliminary",
-}
+YEAR_STATUSES = EXPECTED_STATUSES
 INDUSTRIES = {
     "A": "Pertanian, Kehutanan, dan Perikanan",
     "B": "Pertambangan dan Penggalian",
@@ -103,7 +106,9 @@ def parse_table_candidate(page_text: str) -> TableCandidate:
     )
 
 
-def validate_table(candidate: TableCandidate) -> ExtractedTable:
+def validate_table_with_report(
+    candidate: TableCandidate,
+) -> tuple[ExtractedTable, QualityReport]:
     if not candidate.title_found:
         raise ValueError("Appendix 1 ADHB title was not found on the extracted page.")
     if not candidate.header_found:
@@ -129,7 +134,12 @@ def validate_table(candidate: TableCandidate) -> ExtractedTable:
         )
 
     table = ExtractedTable(rows=rows, published_totals=candidate.total_candidates[0])
-    validate_totals(table)
+    report = validate_totals(table)
+    return table, report
+
+
+def validate_table(candidate: TableCandidate) -> ExtractedTable:
+    table, _ = validate_table_with_report(candidate)
     return table
 
 
@@ -137,15 +147,13 @@ def parse_table(page_text: str) -> ExtractedTable:
     return validate_table(parse_table_candidate(page_text))
 
 
-def validate_totals(table: ExtractedTable) -> None:
-    for index, year in enumerate(YEARS):
-        calculated = sum(values[index] for values in table.rows.values())
-        published = table.published_totals[index]
-        if abs(calculated - published) > TOTAL_TOLERANCE:
-            raise ValueError(
-                f"Industry sum for {year} is {calculated}, published total is "
-                f"{published}."
-            )
+def validate_totals(table: ExtractedTable) -> QualityReport:
+    return check_published_totals(
+        table.rows,
+        table.published_totals,
+        YEARS,
+        TOTAL_TOLERANCE,
+    )
 
 
 def write_intermediate(table: ExtractedTable, output_path: Path) -> None:
@@ -178,8 +186,8 @@ def normalize(table: ExtractedTable) -> list[dict[str, str]]:
                     "industry_code": code,
                     "industry_name": name,
                     "year": str(year),
-                    "series_code": "adhb",
-                    "unit": "billion_idr",
+                    "series_code": EXPECTED_SERIES_CODE,
+                    "unit": EXPECTED_UNIT,
                     "value": format(table.rows[code][index], ".2f"),
                     "publication_status": YEAR_STATUSES[year],
                 }

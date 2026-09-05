@@ -56,7 +56,10 @@ class ExtractTests(unittest.TestCase):
 
     def test_total_mismatch_is_rejected(self):
         invalid_text = self.page_text.replace("8,204.11", "8,999.99")
-        with self.assertRaisesRegex(ValueError, "Industry sum for 2021"):
+        with self.assertRaisesRegex(
+            ValueError,
+            "rule=published_total_reconciliation.*Industry sum for 2021",
+        ):
             parse_table(invalid_text)
 
     def test_candidate_validation_rejects_duplicate_industry(self):
