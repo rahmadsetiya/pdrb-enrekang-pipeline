@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdrb-enrekang-pipeline"
+version = "0.1.0"
+description = "A small pipeline for Kabupaten Enrekang PDRB data"
+requires-python = ">=3.12"
+dependencies = [
+    "psycopg[binary]==3.3.5",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
