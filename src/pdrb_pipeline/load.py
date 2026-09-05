@@ -3,6 +3,35 @@ import json
 from pathlib import Path
 
 
+EXPECTED_OBSERVATIONS = 85
+COUNT_OBSERVATIONS_SQL = """
+    SELECT COUNT(*)
+    FROM pdrb.observations
+    WHERE region_code = '7316' AND series_code = 'adhb'
+"""
+
+
+def _count_observations(cursor) -> int:
+    return cursor.execute(COUNT_OBSERVATIONS_SQL).fetchone()[0]
+
+
+def count_observations(database_url: str) -> int:
+    import psycopg
+
+    with psycopg.connect(database_url) as connection:
+        with connection.cursor() as cursor:
+            return _count_observations(cursor)
+
+
+def verify_observation_count(database_url: str) -> int:
+    count = count_observations(database_url)
+    if count != EXPECTED_OBSERVATIONS:
+        raise ValueError(
+            f"Expected {EXPECTED_OBSERVATIONS} PostgreSQL observations, found {count}."
+        )
+    return count
+
+
 def load_postgres(
     database_url: str,
     processed_path: Path,
@@ -14,8 +43,11 @@ def load_postgres(
     provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
     with processed_path.open(encoding="utf-8") as source:
         observations = list(csv.DictReader(source))
-    if len(observations) != 85:
-        raise ValueError(f"Expected 85 observations, found {len(observations)}.")
+    if len(observations) != EXPECTED_OBSERVATIONS:
+        raise ValueError(
+            f"Expected {EXPECTED_OBSERVATIONS} observations, "
+            f"found {len(observations)}."
+        )
 
     with psycopg.connect(database_url) as connection:
         connection.execute(schema_path.read_text(encoding="utf-8"))
@@ -96,11 +128,5 @@ def load_postgres(
                     for row in observations
                 ],
             )
-            count = cursor.execute(
-                """
-                SELECT COUNT(*)
-                FROM pdrb.observations
-                WHERE region_code = '7316' AND series_code = 'adhb'
-                """
-            ).fetchone()[0]
+            count = _count_observations(cursor)
     return count

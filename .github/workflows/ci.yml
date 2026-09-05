@@ -11,6 +11,20 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+        env:
+          POSTGRES_DB: pdrb
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pdrb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Checkout repository
@@ -32,3 +46,14 @@ jobs:
 
       - name: Reproduce transformed data from canonical PDF
         run: python -m pdrb_pipeline transform
+
+      - name: Run orchestrated flow twice
+        env:
+          DATABASE_URL: postgresql://postgres@localhost:5432/pdrb
+          PREFECT_SERVER_EPHEMERAL_ENABLED: "true"
+          PREFECT_SERVER_ANALYTICS_ENABLED: "false"
+          PREFECT_CLOUD_ENABLE_ORCHESTRATION_TELEMETRY: "false"
+          PREFECT_TELEMETRY_ENABLE_RESOURCE_METRICS: "false"
+        run: |
+          python -m pdrb_pipeline orchestrate
+          python -m pdrb_pipeline orchestrate

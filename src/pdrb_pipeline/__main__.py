@@ -9,7 +9,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Process Kabupaten Enrekang PDRB data.")
     parser.add_argument(
         "command",
-        choices=("transform", "load", "run"),
+        choices=("transform", "load", "run", "orchestrate"),
         help="Pipeline stage to execute.",
     )
     return parser.parse_args()
@@ -17,6 +17,16 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.command == "orchestrate":
+        database_url = os.environ.get("DATABASE_URL")
+        if not database_url:
+            raise SystemExit("DATABASE_URL is required for PostgreSQL loading.")
+        from .orchestration import pdrb_ingestion_flow
+
+        count = pdrb_ingestion_flow(database_url)
+        print(f"Orchestrated flow verified {count} PostgreSQL observations.")
+        return
+
     if args.command in {"transform", "run"}:
         count = transform()
         print(f"Wrote {count} observations to {PROCESSED}")

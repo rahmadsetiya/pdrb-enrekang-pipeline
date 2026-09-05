@@ -10,6 +10,8 @@ from pdrb_pipeline.extract import (
     normalize,
     parse_decimal,
     parse_table,
+    parse_table_candidate,
+    validate_table,
     write_intermediate,
     write_observations,
 )
@@ -56,6 +58,18 @@ class ExtractTests(unittest.TestCase):
         invalid_text = self.page_text.replace("8,204.11", "8,999.99")
         with self.assertRaisesRegex(ValueError, "Industry sum for 2021"):
             parse_table(invalid_text)
+
+    def test_candidate_validation_rejects_duplicate_industry(self):
+        candidate = parse_table_candidate(self.page_text)
+        duplicate = candidate.__class__(
+            rows=(*candidate.rows, candidate.rows[0]),
+            total_candidates=candidate.total_candidates,
+            title_found=candidate.title_found,
+            header_found=candidate.header_found,
+        )
+
+        with self.assertRaisesRegex(ValueError, "Duplicate industry code"):
+            validate_table(duplicate)
 
     def test_normalization_produces_85_sector_observations(self):
         observations = normalize(parse_table(self.page_text))

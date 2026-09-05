@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 from .extract import (
+    ExtractedTable,
     extract_page_text,
     normalize,
     parse_table,
@@ -23,6 +24,10 @@ def transform(executable: str = "pdftotext") -> int:
     load_and_verify(RAW_PDF, PROVENANCE)
     page_text = extract_page_text(RAW_PDF, executable=executable)
     table = parse_table(page_text)
+    return materialize(table)
+
+
+def materialize(table: ExtractedTable) -> int:
     write_intermediate(table, INTERMEDIATE)
     observations = normalize(table)
     write_observations(observations, PROCESSED)
