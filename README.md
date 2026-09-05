@@ -120,6 +120,9 @@ python -m pip install .
 python -m unittest discover -s tests -v
 ```
 
+Run commands from the repository root. For another working directory, set
+`PDRB_PROJECT_ROOT` to the absolute repository path.
+
 ## Reset local PostgreSQL
 
 This removes the local database volume but does not touch the raw PDF:

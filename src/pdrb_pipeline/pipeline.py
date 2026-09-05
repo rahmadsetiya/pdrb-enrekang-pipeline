@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from .extract import (
@@ -10,7 +11,7 @@ from .extract import (
 from .provenance import load_and_verify
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(os.environ.get("PDRB_PROJECT_ROOT", Path.cwd())).resolve()
 RAW_PDF = PROJECT_ROOT / "data/raw/bps/pdrb_enrekang_by_industry_2021_2025.pdf"
 PROVENANCE = RAW_PDF.with_suffix(".provenance.json")
 INTERMEDIATE = PROJECT_ROOT / "data/intermediate/pdrb_adhb_by_industry_wide.csv"
