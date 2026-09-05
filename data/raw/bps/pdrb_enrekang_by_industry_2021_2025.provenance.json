@@ -1,0 +1,18 @@
+{
+  "publisher": "Badan Pusat Statistik Kabupaten Enrekang",
+  "publication_title": "Produk Domestik Regional Bruto Kabupaten Enrekang Menurut Lapangan Usaha 2021-2025",
+  "publication_number": "73160.26004",
+  "release_date": "2026-04-06",
+  "retrieved_at": "2026-09-05T03:38:41Z",
+  "publication_url": "https://enrekangkab.bps.go.id/id/publication/2026/04/06/e9fe889449c8b0cf8eb4c692/produk-domestik-regional-bruto-kabupaten-enrekang-menurut-lapangan-usaha-2021-2025.html",
+  "download_endpoint": "https://web-api.bps.go.id/download.php",
+  "raw_file": "data/raw/bps/pdrb_enrekang_by_industry_2021_2025.pdf",
+  "file_size_bytes": 2183611,
+  "sha256": "6a8e8bc5a15ff355ffe462d471c517fa6f832ef93f6e990bbc4fbc165f32fdb9",
+  "target_table": {
+    "appendix": 1,
+    "pdf_page": 127,
+    "printed_page": 107,
+    "title": "Produk Domestik Regional Bruto Enrekang Atas Dasar Harga Berlaku Menurut Lapangan Usaha (Miliar Rupiah), 2021-2025"
+  }
+}

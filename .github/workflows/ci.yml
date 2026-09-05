@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PDF and Python dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes poppler-utils
+          python -m pip install .
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Reproduce transformed data from canonical PDF
+        run: python -m pdrb_pipeline transform
