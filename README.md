@@ -241,6 +241,37 @@ For diagnostics, run only the command named in the report's `action` field.
 The status command intentionally performs no restart, reload, cleanup, or
 self-healing action.
 
+## Operational issue proposals
+
+Generate reviewable issue candidates from the same deterministic operational
+report:
+
+```bash
+python -m pdrb_pipeline propose-issues
+python -m pdrb_pipeline propose-issues --format json
+```
+
+The command is read-only. It runs `status`, reads existing issue metadata with
+`gh issue list`, and emits proposals; it has no `--create` option, GitHub write
+operation, or remediation behavior. GitHub Issues remain the engineering
+source of truth: a proposal must be reviewed and explicitly approved before a
+separate engineering workflow creates an issue.
+
+Each proposal keeps `facts`, `impact`, `hypotheses`, `affected_area`,
+`acceptance_criteria`, and `duplicate` as separate fields. Facts contain only
+allowlisted, sanitized status evidence. Causes are unverified hypotheses, and
+the affected area stays broad or `unknown` when the evidence does not identify
+a subsystem. Optional `BLOCKED` checks such as an unconfigured backup are
+reported as skipped rather than proposed.
+
+Duplicate detection uses a stable `pdrb-ops-v1` fingerprint embedded in the
+candidate body. An exact open match is `OPEN_DUPLICATE`; an exact closed match
+is `RECURRENCE`; a conservative legacy title/check match is
+`POSSIBLE_DUPLICATE`; otherwise it is `CLEAR`. If the complete GitHub issue
+list cannot be inspected, classification is `UNKNOWN`, the command exits `2`,
+and every candidate is held from approval. A clear or recurring candidate is
+still only approval-ready: `approval_required` is always `true`.
+
 ## Tests
 
 Run the tests in the reproducible pipeline image:

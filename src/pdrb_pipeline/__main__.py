@@ -17,14 +17,21 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Process Kabupaten Enrekang PDRB data.")
     parser.add_argument(
         "command",
-        choices=("transform", "load", "run", "orchestrate", "status"),
+        choices=(
+            "transform",
+            "load",
+            "run",
+            "orchestrate",
+            "status",
+            "propose-issues",
+        ),
         help="Pipeline stage to execute.",
     )
     parser.add_argument(
         "--format",
         choices=("human", "json"),
         default="human",
-        help="Status output format (only used by the status command).",
+        help="Output format for status and propose-issues commands.",
     )
     parser.add_argument(
         "--database-only", action="store_true", help=argparse.SUPPRESS
@@ -34,6 +41,16 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.command == "propose-issues":
+        from .discovery import build_discovery_report, inspect_github_issues
+        from .operational import build_operational_report
+
+        status = build_operational_report(PROJECT_ROOT)
+        inspection = inspect_github_issues(PROJECT_ROOT)
+        report = build_discovery_report(status, inspection)
+        print(report.to_json() if args.format == "json" else report.to_human())
+        return report.exit_code
+
     if args.command == "status":
         from .operational import (
             BLOCKED,
