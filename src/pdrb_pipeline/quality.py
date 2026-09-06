@@ -286,13 +286,26 @@ def collect_loaded_metrics(cursor, region_code: str = "7316") -> ObservationMetr
     return ObservationMetrics(*values)
 
 
-def check_loaded_data(database_url: str) -> QualityReport:
+def evaluate_loaded_data(
+    database_url: str,
+    connect_timeout: int | None = None,
+    read_only: bool = False,
+) -> QualityReport:
     import psycopg
 
-    with psycopg.connect(database_url) as connection:
+    connect_options = {}
+    if connect_timeout is not None:
+        connect_options["connect_timeout"] = connect_timeout
+    with psycopg.connect(database_url, **connect_options) as connection:
+        if read_only:
+            connection.read_only = True
         with connection.cursor() as cursor:
             metrics = collect_loaded_metrics(cursor)
-    return require_quality(evaluate_observation_metrics("loaded", metrics))
+    return evaluate_observation_metrics("loaded", metrics)
+
+
+def check_loaded_data(database_url: str) -> QualityReport:
+    return require_quality(evaluate_loaded_data(database_url))
 
 
 def check_published_totals(
