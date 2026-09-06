@@ -64,5 +64,5 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres@localhost:5432/pdrb
         run: |
-          python -m pdrb_pipeline status --format json > /tmp/pdrb-status.json
+          python -m pdrb_pipeline status --format json | tee /tmp/pdrb-status.json
           python -c 'import json; report = json.load(open("/tmp/pdrb-status.json")); assert report["overall_status"] == "PASS"'
