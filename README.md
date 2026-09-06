@@ -171,6 +171,76 @@ docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
   -c "SELECT COUNT(*) FROM pdrb.observations;"
 ```
 
+## Operational status
+
+Run the read-only status command from the repository root in the local Python
+environment:
+
+```bash
+python -m pdrb_pipeline status
+python -m pdrb_pipeline status --format json
+```
+
+The command inspects the Git working tree, Docker Compose status where access
+is available, PostgreSQL connectivity and loaded-data quality, optional backup
+metadata, and project-filesystem usage. It never transforms or loads data,
+initializes schema, changes Git state, starts or restarts Compose services,
+creates or extracts backups, applies retention, or remediates failures.
+
+Checks use `PASS`, `FAIL`, or `BLOCKED`. Human output is concise and includes a
+likely cause and next diagnostic action for non-passing checks. JSON uses a
+stable schema and check order, contains no generated timestamp, and is suitable
+for a future operations agent:
+
+```json
+{"checks":[],"counts":{"BLOCKED":0,"FAIL":0,"PASS":0},"overall_status":"PASS","schema_version":1}
+```
+
+The real report includes the check objects. Each object has `check_id`,
+`status`, `required`, `summary`, `observed`, `cause`, and `action`. Exit codes
+are `0` for required checks passing, `1` for a required failure, and `2` when no
+required check fails but at least one is blocked.
+
+PostgreSQL reporting reuses the existing quality contract rather than defining
+new row-count or year rules. A healthy slice reports 85 rows, 17 industries,
+and years 2021-2025. When `DATABASE_URL` is available, status connects directly
+with a bounded read-only session. Otherwise, it runs the same database-only
+quality check in the existing `pipeline` image with:
+
+```text
+docker compose run --rm --no-deps -T pipeline ...
+```
+
+The fallback does not start dependencies, publish PostgreSQL, mount the Docker
+socket, or persist its disposable helper container. Compose injects the service
+configuration inside that container, so credentials are not copied to the host
+command or report. The PostgreSQL session remains read-only in both modes;
+`observed.connection_mode` is `direct` or `compose`.
+
+Docker inspection is optional because the status command may run where the
+daemon is inaccessible. Permission, missing-image, or daemon errors are
+reported as `BLOCKED`, not as a crash, and no Docker socket is mounted into the
+pipeline container.
+Filesystem usage is reported in bytes and percent; usage at or above 90 percent
+is a `FAIL` that recommends inspection but never deletes files.
+
+This repository does not currently define a backup workflow or default backup
+directory. Consequently, backup status is optional and reports
+`observed=NOT_CONFIGURED` with `status=BLOCKED` unless `PDRB_BACKUP_DIR` is set:
+
+```bash
+PDRB_BACKUP_DIR=/absolute/external/path python -m pdrb_pipeline status
+```
+
+The configured directory must be outside the repository. Status only reads
+metadata for files matching
+`pdrb-enrekang-pipeline-YYYYmmddTHHMMSSZ.tar.gz`; it does not infer unrelated
+sibling conventions or inspect archive contents.
+
+For diagnostics, run only the command named in the report's `action` field.
+The status command intentionally performs no restart, reload, cleanup, or
+self-healing action.
+
 ## Tests
 
 Run the tests in the reproducible pipeline image:

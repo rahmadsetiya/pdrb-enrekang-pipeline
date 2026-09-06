@@ -1,0 +1,10 @@
+services:
+  db:
+    environment:
+      POSTGRES_DB: pdrb
+      POSTGRES_USER: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+
+  pipeline:
+    environment:
+      DATABASE_URL: postgresql://postgres@db:5432/pdrb
