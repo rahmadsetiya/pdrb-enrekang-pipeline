@@ -66,3 +66,19 @@ jobs:
         run: |
           python -m pdrb_pipeline status --format json | tee /tmp/pdrb-status.json
           python -c 'import json; report = json.load(open("/tmp/pdrb-status.json")); assert report["overall_status"] == "PASS"'
+
+      - name: Verify host status through private Compose network
+        env:
+          COMPOSE_FILE: compose.yml:.github/compose.status-test.yml
+        run: |
+          docker compose up -d --wait db
+          docker compose build pipeline
+          docker compose run --rm pipeline python -m pdrb_pipeline run
+          env -u DATABASE_URL python -m pdrb_pipeline status --format json | tee /tmp/pdrb-compose-status.json
+          python -c 'import json; report = json.load(open("/tmp/pdrb-compose-status.json")); database = next(check for check in report["checks"] if check["check_id"] == "postgres"); assert report["overall_status"] == "PASS"; assert database["observed"]["connection_mode"] == "compose"'
+
+      - name: Remove host-status test containers
+        if: always()
+        env:
+          COMPOSE_FILE: compose.yml:.github/compose.status-test.yml
+        run: docker compose down --volumes

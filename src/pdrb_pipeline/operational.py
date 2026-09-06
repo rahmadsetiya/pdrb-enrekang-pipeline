@@ -20,6 +20,22 @@ BACKUP_PATTERN = re.compile(
     r"^pdrb-enrekang-pipeline-(?P<timestamp>\d{8}T\d{6}Z)\.tar\.gz$"
 )
 DISK_USAGE_FAIL_PERCENT = 90.0
+COMPOSE_POSTGRES_COMMAND = (
+    "docker",
+    "compose",
+    "run",
+    "--rm",
+    "--no-deps",
+    "-T",
+    "pipeline",
+    "python",
+    "-m",
+    "pdrb_pipeline",
+    "status",
+    "--format",
+    "json",
+    "--database-only",
+)
 
 
 @dataclass(frozen=True)
@@ -34,6 +50,11 @@ class OperationalCheck:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    def to_json(self) -> str:
+        return json.dumps(
+            self.to_dict(), ensure_ascii=True, separators=(",", ":"), sort_keys=True
+        )
 
 
 @dataclass(frozen=True)
@@ -81,14 +102,16 @@ class OperationalReport:
         return "\n".join(lines)
 
 
-def _run_command(command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+def _run_command(
+    command: Sequence[str], cwd: Path, timeout: int = 5
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
         cwd=cwd,
         capture_output=True,
         check=False,
         text=True,
-        timeout=5,
+        timeout=timeout,
     )
 
 
@@ -245,7 +268,26 @@ def _quality_result(report: QualityReport, rule_id: str) -> str:
     )
 
 
-def check_postgres(database_url: str | None) -> OperationalCheck:
+def _with_connection_mode(
+    check: OperationalCheck, connection_mode: str
+) -> OperationalCheck:
+    observed = (
+        {"connection_mode": connection_mode, **check.observed}
+        if isinstance(check.observed, dict)
+        else {"connection_mode": connection_mode, "result": check.observed}
+    )
+    return OperationalCheck(
+        check.check_id,
+        check.status,
+        check.required,
+        check.summary,
+        observed,
+        check.cause,
+        check.action,
+    )
+
+
+def check_postgres_direct(database_url: str | None) -> OperationalCheck:
     if not database_url:
         return OperationalCheck(
             "postgres",
@@ -312,6 +354,80 @@ def check_postgres(database_url: str | None) -> OperationalCheck:
         ),
         observed,
     )
+
+
+def _parse_compose_postgres_check(output: str) -> OperationalCheck:
+    payload = json.loads(output)
+    if not isinstance(payload, dict):
+        raise ValueError("database status output is not an object")
+    required_fields = {"check_id", "status", "required", "summary", "observed"}
+    if not required_fields.issubset(payload):
+        raise ValueError("database status output is incomplete")
+    if payload["check_id"] != "postgres" or payload["status"] not in {
+        PASS,
+        FAIL,
+        BLOCKED,
+    }:
+        raise ValueError("database status output is invalid")
+    if payload["required"] is not True or not isinstance(payload["summary"], str):
+        raise ValueError("database status output has invalid field types")
+    cause = payload.get("cause")
+    action = payload.get("action")
+    if cause is not None and not isinstance(cause, str):
+        raise ValueError("database status cause is invalid")
+    if action is not None and not isinstance(action, str):
+        raise ValueError("database status action is invalid")
+    return OperationalCheck(
+        "postgres",
+        payload["status"],
+        payload["required"],
+        payload["summary"],
+        payload["observed"],
+        cause,
+        action,
+    )
+
+
+def check_postgres_via_compose(project_root: Path) -> OperationalCheck:
+    try:
+        result = _run_command(COMPOSE_POSTGRES_COMMAND, project_root, timeout=20)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return OperationalCheck(
+            "postgres",
+            BLOCKED,
+            True,
+            "PostgreSQL quality check through Compose is unavailable",
+            {"connection_mode": "compose", "result": "UNAVAILABLE"},
+            "Docker Compose is unavailable or the bounded check did not complete.",
+            "Run docker compose ps and verify the pipeline image is available.",
+        )
+
+    try:
+        check = _parse_compose_postgres_check(result.stdout.strip())
+        expected_exit_code = {PASS: 0, FAIL: 1, BLOCKED: 2}[check.status]
+        if result.returncode != expected_exit_code:
+            raise ValueError("database status exit code does not match its result")
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return OperationalCheck(
+            "postgres",
+            BLOCKED,
+            True,
+            "PostgreSQL quality check through Compose is unavailable",
+            {"connection_mode": "compose", "exit_code": result.returncode},
+            "The disposable pipeline check did not return valid status JSON.",
+            "Run docker compose ps and verify the pipeline image is current.",
+        )
+    return _with_connection_mode(check, "compose")
+
+
+def check_postgres(
+    database_url: str | None, project_root: Path | None = None
+) -> OperationalCheck:
+    if database_url:
+        return _with_connection_mode(check_postgres_direct(database_url), "direct")
+    if project_root is not None:
+        return check_postgres_via_compose(project_root)
+    return check_postgres_direct(None)
 
 
 def _is_within(path: Path, parent: Path) -> bool:
@@ -496,7 +612,7 @@ def build_operational_report(
     checks = (
         check_repository(project_root),
         check_compose(project_root),
-        check_postgres(environment.get("DATABASE_URL")),
+        check_postgres(environment.get("DATABASE_URL"), project_root),
         check_backup(project_root, environment.get("PDRB_BACKUP_DIR")),
         check_disk(project_root),
     )

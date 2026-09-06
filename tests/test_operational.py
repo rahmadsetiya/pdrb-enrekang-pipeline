@@ -12,6 +12,7 @@ import psycopg
 
 from pdrb_pipeline.operational import (
     BLOCKED,
+    COMPOSE_POSTGRES_COMMAND,
     FAIL,
     PASS,
     OperationalCheck,
@@ -100,8 +101,48 @@ class OperationalReportTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(json.loads(output.getvalue())["overall_status"], PASS)
 
+    @patch("pdrb_pipeline.operational.check_postgres_direct")
+    def test_database_only_cli_emits_one_machine_readable_check(self, check_direct):
+        from pdrb_pipeline.__main__ import main
+
+        check_direct.return_value = OperationalCheck(
+            "postgres",
+            PASS,
+            True,
+            "slice rows=85 industries=17 years=2021-2025",
+            {"row_count": 85},
+        )
+        output = io.StringIO()
+
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "pdrb_pipeline",
+                "status",
+                "--format",
+                "json",
+                "--database-only",
+            ],
+        ):
+            with patch("sys.stdout", output):
+                exit_code = main()
+
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["check_id"], "postgres")
+        self.assertEqual(payload["observed"]["row_count"], 85)
+
 
 class CollectorTests(unittest.TestCase):
+    def test_compose_postgres_fallback_has_no_dependency_start_or_secret_args(self):
+        rendered = " ".join(COMPOSE_POSTGRES_COMMAND)
+
+        self.assertIn("run --rm --no-deps -T pipeline", rendered)
+        self.assertNotIn("DATABASE_URL", rendered)
+        self.assertNotIn("POSTGRES_PASSWORD", rendered)
+        self.assertNotIn("docker.sock", rendered)
+
     @patch("pdrb_pipeline.operational._run_command")
     def test_repository_dirty_is_attributable_failure(self, run_command):
         run_command.return_value = subprocess.CompletedProcess(
@@ -161,6 +202,79 @@ class CollectorTests(unittest.TestCase):
         self.assertTrue(result.required)
         self.assertEqual(result.observed, "NOT_CONFIGURED")
 
+    @patch("pdrb_pipeline.operational._run_command")
+    def test_postgres_uses_compose_fallback_without_host_database_url(
+        self, run_command
+    ):
+        compose_check = OperationalCheck(
+            "postgres",
+            PASS,
+            True,
+            "slice rows=85 industries=17 years=2021-2025",
+            {
+                "failed_rules": [],
+                "industry_count": 17,
+                "row_count": 85,
+                "year_range": "2021-2025",
+            },
+        )
+        run_command.return_value = subprocess.CompletedProcess(
+            [], 0, json.dumps(compose_check.to_dict()), ""
+        )
+
+        result = check_postgres(None, Path("/project"))
+
+        self.assertEqual(result.status, PASS)
+        self.assertEqual(result.observed["connection_mode"], "compose")
+        self.assertEqual(result.observed["row_count"], 85)
+        run_command.assert_called_once_with(
+            COMPOSE_POSTGRES_COMMAND, Path("/project"), timeout=20
+        )
+
+    @patch("pdrb_pipeline.operational._run_command")
+    def test_compose_fallback_permission_error_is_required_blocked(
+        self, run_command
+    ):
+        run_command.return_value = subprocess.CompletedProcess(
+            [], 1, "", "permission denied: sensitive-marker"
+        )
+
+        result = check_postgres(None, Path("/project"))
+        rendered = json.dumps(result.to_dict())
+
+        self.assertEqual(result.status, BLOCKED)
+        self.assertTrue(result.required)
+        self.assertEqual(result.observed["connection_mode"], "compose")
+        self.assertNotIn("sensitive-marker", rendered)
+
+    @patch("pdrb_pipeline.operational._run_command")
+    def test_compose_fallback_preserves_attributable_quality_failure(
+        self, run_command
+    ):
+        compose_check = OperationalCheck(
+            "postgres",
+            FAIL,
+            True,
+            "loaded PDRB slice failed quality checks",
+            {
+                "failed_rules": ["row_count"],
+                "industry_count": 17,
+                "row_count": 84,
+                "year_range": "2021-2025",
+            },
+            "Quality rules failed: row_count.",
+            "Run the documented quality diagnostics; do not reload automatically.",
+        )
+        run_command.return_value = subprocess.CompletedProcess(
+            [], 1, json.dumps(compose_check.to_dict()), ""
+        )
+
+        result = check_postgres(None, Path("/project"))
+
+        self.assertEqual(result.status, FAIL)
+        self.assertEqual(result.observed["connection_mode"], "compose")
+        self.assertEqual(result.observed["failed_rules"], ["row_count"])
+
     @patch("pdrb_pipeline.operational.evaluate_loaded_data")
     def test_healthy_postgres_reports_slice_metrics(self, evaluate):
         evaluate.return_value = evaluate_observation_metrics(
@@ -173,6 +287,7 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(result.status, PASS)
         self.assertEqual(result.observed["row_count"], 85)
         self.assertEqual(result.observed["industry_count"], 17)
+        self.assertEqual(result.observed["connection_mode"], "direct")
         self.assertIn("2021-2025", result.observed["year_range"])
         evaluate.assert_called_once_with(
             "database-url-marker", connect_timeout=3, read_only=True
@@ -201,6 +316,22 @@ class CollectorTests(unittest.TestCase):
 
         self.assertEqual(result.status, FAIL)
         self.assertNotIn(database_url, rendered)
+
+    @patch("pdrb_pipeline.operational._run_command")
+    @patch("pdrb_pipeline.operational.evaluate_loaded_data")
+    def test_direct_database_url_does_not_invoke_compose(
+        self, evaluate, run_command
+    ):
+        evaluate.return_value = evaluate_observation_metrics(
+            "loaded",
+            ObservationMetrics(85, 17, 2021, 2025, 5, 0, 0, 0, 0, 0, 0, 0),
+        )
+
+        result = check_postgres("database-url-marker", Path("/project"))
+
+        self.assertEqual(result.status, PASS)
+        self.assertEqual(result.observed["connection_mode"], "direct")
+        run_command.assert_not_called()
 
     def test_backup_is_not_inferred_when_unconfigured(self):
         result = check_backup(Path("/project"), None)

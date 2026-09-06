@@ -26,13 +26,26 @@ def parse_args():
         default="human",
         help="Status output format (only used by the status command).",
     )
+    parser.add_argument(
+        "--database-only", action="store_true", help=argparse.SUPPRESS
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
     if args.command == "status":
-        from .operational import build_operational_report
+        from .operational import (
+            BLOCKED,
+            FAIL,
+            build_operational_report,
+            check_postgres_direct,
+        )
+
+        if args.database_only:
+            check = check_postgres_direct(os.environ.get("DATABASE_URL"))
+            print(check.to_json())
+            return {FAIL: 1, BLOCKED: 2}.get(check.status, 0)
 
         report = build_operational_report(PROJECT_ROOT)
         print(report.to_json() if args.format == "json" else report.to_human())
